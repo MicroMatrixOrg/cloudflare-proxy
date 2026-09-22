@@ -3,7 +3,7 @@
  *
  * 路由规则：
  *   OPTIONS *                  → CORS 预检
- *   /v2/...                    → Docker Registry → registry-1.docker.io
+ *   * /v2/...                    → Docker Registry（Docker Hub 或显式第三方 Registry）
  *   /https://... /http://...   → 通用 URL 代理（git clone / wget）
  *   /<image> 或 /<user>/<img>  → Docker pull（docker pull 本域名时）
  *   其他路径                     → Pages 静态资源
@@ -113,20 +113,57 @@ function wrapResponse(upstream) {
 
 /** 解析 WWW-Authenticate 并拿 token */
 async function fetchDockerToken(wwwAuth) {
-  const m = wwwAuth.match(/Bearer realm="([^"]+?)",service="([^"]*?)",scope="([^"]*?)"/);
-  if (!m) return null;
+    if (!wwwAuth || !/^Bearer\s+/i.test(wwwAuth)) {
+        return null;
+    }
 
-  const [, realm, service, scope] = m;
-  const tokenUrl = `${realm}?service=${service}&scope=${encodeURIComponent(scope)}`;
+    const params = {};
 
-  try {
-    const res = await fetch(tokenUrl, { headers: { Accept: 'application/json' } });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.token || data.access_token || null;
-  } catch {
-    return null;
-  }
+    const paramText = wwwAuth.replace(/^Bearer\s+/i, '');
+
+    for (const match of paramText.matchAll(/([a-zA-Z][a-zA-Z0-9_-]*)="([^"]*)"/g)) {
+        params[match[1].toLowerCase()] = match[2];
+    }
+
+    const realm = params.realm;
+
+    if (!realm) {
+        return null;
+    }
+
+    let tokenUrl;
+
+    try {
+        tokenUrl = new URL(realm);
+
+        if (params.service) {
+            tokenUrl.searchParams.set('service', params.service);
+        }
+
+        if (params.scope) {
+            tokenUrl.searchParams.set('scope', params.scope);
+        }
+    } catch {
+        return null;
+    }
+
+    try {
+        const res = await fetch(tokenUrl.toString(), {
+            headers: {
+                Accept: 'application/json',
+            },
+        });
+
+        if (!res.ok) {
+            return null;
+        }
+
+        const data = await res.json();
+
+        return data.token || data.access_token || null;
+    } catch {
+        return null;
+    }
 }
 
 // ============================================================
@@ -209,26 +246,67 @@ async function proxyWithAuth(targetUrl, request, isDocker, redirectCount = 0) {
  * 不做"单段 = library/xxx"的猜测，避免把 /gh、/docs 等静态页面路径误判为镜像名。
  */
 function parseDockerPath(pathname, search) {
-  if (pathname.startsWith('/v2/')) {
-    return {
-      targetUrl: DOCKER_UPSTREAM + pathname + (search || ''),
-      isDocker: true,
-    };
-  }
+    // Docker Registry API 探活请求
+    if (pathname === '/v2' || pathname === '/v2/') {
+        return {
+            ping: true,
+            isDocker: true,
+        };
+    }
 
-  const parts = pathname.split('/').filter(Boolean);
-  if (parts.length === 0) return null;
+    // 显式指定第三方 Registry：
+    //
+    // docker pull proxy.example.com/ghcr.io/user/image:tag
+    //
+    // Docker daemon 实际请求：
+    //
+    // /v2/ghcr.io/user/image/manifests/tag
+    //
+    // 必须优先识别 /v2/ 后面的 ghcr.io / quay.io / gcr.io 等 Registry。
+    if (pathname.startsWith('/v2/')) {
+        const registryPath = pathname.slice('/v2/'.length);
+        const parts = registryPath.split('/').filter(Boolean);
 
-  if (DOCKER_REGISTRIES.has(parts[0])) {
-    const host = parts[0];
-    const imagePath = parts.slice(1).join('/');
-    return {
-      targetUrl: `https://${host}/v2/${imagePath}`,
-      isDocker: true,
-    };
-  }
+        if (parts.length > 0 && DOCKER_REGISTRIES.has(parts[0])) {
+            const host = parts[0];
+            const imagePath = parts.slice(1).join('/');
 
-  return null;
+            return {
+                targetUrl: `https://${host}/v2/${imagePath}${search || ''}`,
+                isDocker: true,
+            };
+        }
+
+        // 没有显式指定第三方 Registry，
+        // 按 Docker Hub registry mirror 处理。
+        return {
+            targetUrl: DOCKER_UPSTREAM + pathname + (search || ''),
+            isDocker: true,
+        };
+    }
+
+    // 兼容直接访问：
+    //
+    // /ghcr.io/user/image/...
+    // /quay.io/user/image/...
+    //
+    const parts = pathname.split('/').filter(Boolean);
+
+    if (parts.length === 0) {
+        return null;
+    }
+
+    if (DOCKER_REGISTRIES.has(parts[0])) {
+        const host = parts[0];
+        const imagePath = parts.slice(1).join('/');
+
+        return {
+            targetUrl: `https://${host}/v2/${imagePath}${search || ''}`,
+            isDocker: true,
+        };
+    }
+
+    return null;
 }
 
 // ============================================================
@@ -245,7 +323,24 @@ export default {
     // —— Docker 路径 ——
     const docker = parseDockerPath(pathname, search);
     if (docker) {
-      return proxyWithAuth(docker.targetUrl, request, docker.isDocker);
+        // Docker 客户端会先请求 /v2/ 判断 Registry 是否可用。
+        // 这里直接声明本服务支持 Registry V2，
+        // 避免无目标 Registry 时提前跳到 Docker Hub 鉴权。
+        if (docker.ping) {
+            return new Response('{}', {
+                status: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Docker-Distribution-Api-Version': 'registry/2.0',
+                },
+            });
+        }
+
+        return proxyWithAuth(
+            docker.targetUrl,
+            request,
+            docker.isDocker
+        );
     }
 
     // —— 通用 URL 代理 (/https://github.com/...) ——
