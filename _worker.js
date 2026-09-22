@@ -177,7 +177,7 @@ async function proxyWithAuth(targetUrl, request, isDocker, redirectCount = 0) {
 
   const headers = buildReqHeaders(request, targetUrl);
 
-  const upstream = await fetch(targetUrl, {
+  let upstream = await fetch(targetUrl, {
     method: request.method,
     headers,
     body: request.body,
@@ -187,22 +187,30 @@ async function proxyWithAuth(targetUrl, request, isDocker, redirectCount = 0) {
   // ===== Docker 401 → 拿 token 重试 =====
   if (isDocker && upstream.status === 401) {
     const wwwAuth = upstream.headers.get('WWW-Authenticate');
-    if (wwwAuth) {
-      const token = await fetchDockerToken(wwwAuth);
-      if (token) {
-        const authHeaders = buildReqHeaders(request, targetUrl);
-        authHeaders.set('Authorization', `Bearer ${token}`);
-        const retry = await fetch(targetUrl, {
-          method: request.method,
-          headers: authHeaders,
-          body: request.body,
-          redirect: 'manual',
-        });
-        return retry;
-      }
+
+    if (!wwwAuth) {
+      return wrapResponse(upstream);
     }
-    // token 拿不到就原样返回 401
-    return wrapResponse(upstream);
+
+    const token = await fetchDockerToken(wwwAuth);
+
+    if (!token) {
+      return wrapResponse(upstream);
+    }
+
+    const authHeaders = buildReqHeaders(request, targetUrl);
+    authHeaders.set('Authorization', `Bearer ${token}`);
+
+    upstream = await fetch(targetUrl, {
+      method: request.method,
+      headers: authHeaders,
+      body: request.body,
+      redirect: 'manual',
+    });
+
+    // 注意：
+    // 这里不能直接 return。
+    // 让鉴权后的响应继续进入下面的 CDN / S3 重定向处理逻辑。
   }
 
   // ===== S3 / CDN 重定向 → 重新代理 =====
