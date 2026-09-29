@@ -31,10 +31,10 @@ Docker镜像拉取的时候会自动反代S3的重定向链接，不用你客户
 # 原地址
 git clone https://github.com/maoshengyzx/cloudflare-proxy.git
 # 加速地址
-git clone https://https://gh.micromatrix.kdns.fr/https://github.com/maoshengyzx/cloudflare-proxy.git
+git clone https://gh.micromatrix.kdns.fr/https://github.com/maoshengyzx/cloudflare-proxy.git
 
 # 下载Release包
-wget https://https://gh.micromatrix.kdns.fr/https://github.com/maoshengyzx/cloudflare-proxy/releases/download/v1.0.0/release.zip
+wget https://gh.micromatrix.kdns.fr/https://github.com/maoshengyzx/cloudflare-proxy/releases/download/v1.0.0/release.zip
 ```
 
 ### Docker 加速
@@ -42,7 +42,7 @@ Linux 系统配置：
 ```bash
 sudo tee /etc/docker/daemon.json <<-'EOF'
 {
-  "registry-mirrors": ["https://https://gh.micromatrix.kdns.fr"]
+  "registry-mirrors": ["https://gh.micromatrix.kdns.fr"]
 }
 EOF
 sudo systemctl daemon-reload
