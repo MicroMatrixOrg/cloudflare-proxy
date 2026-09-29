@@ -4,17 +4,17 @@
  */
 
 /**
- * Replace all instances of 'cloudflare-proxy-6rw.pages.dev' in text nodes and code blocks
+ * Replace all instances of 'https://gh.micromatrix.kdns.fr' in text nodes and code blocks
  * with the configured domain from config.js.
  */
 function applyDomain() {
-  var domain = (window.CF_PROXY && window.CF_PROXY.DOMAIN) || 'cloudflare-proxy-6rw.pages.dev';
-  if (domain === 'cloudflare-proxy-6rw.pages.dev') return;
+  var domain = (window.CF_PROXY && window.CF_PROXY.DOMAIN) || 'https://gh.micromatrix.kdns.fr';
+  if (domain === 'https://gh.micromatrix.kdns.fr') return;
 
   function replaceText(node) {
     if (node.nodeType === 3) {
       // Text node
-      if (node.textContent.indexOf('cloudflare-proxy-6rw.pages.dev') !== -1) {
+      if (node.textContent.indexOf('https://gh.micromatrix.kdns.fr') !== -1) {
         node.textContent = node.textContent.replace(/your-domain\.com/g, domain);
       }
     } else if (node.nodeType === 1) {
