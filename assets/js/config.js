@@ -5,5 +5,5 @@
  * Everything else auto-updates on page load.
  */
 window.CF_PROXY = {
-  DOMAIN: 'https://gh.micromatrix.kdns.fr',
+  DOMAIN: 'gh.micromatrix.kdns.fr',
 };
